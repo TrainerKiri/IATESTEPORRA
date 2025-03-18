@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { supabase } from './lib/supabase';
 
 interface GameState {
   palavra: string;
@@ -15,9 +16,14 @@ interface GameState {
   setPontuacaoJogador: (pontuacao: number) => void;
   modo: 'ia' | 'pvp';
   setModo: (modo: 'ia' | 'pvp') => void;
+  user: any | null;
+  setUser: (user: any) => void;
+  ranking: any[];
+  loadRanking: () => Promise<void>;
+  updateRanking: (victory: boolean) => Promise<void>;
 }
 
-export const useGameStore = create<GameState>((set) => ({
+export const useGameStore = create<GameState>((set, get) => ({
   palavra: '',
   setPalavra: (palavra) => set({ palavra }),
   tentativas: 0,
@@ -32,4 +38,52 @@ export const useGameStore = create<GameState>((set) => ({
   setPontuacaoJogador: (pontuacao) => set({ pontuacaoJogador: pontuacao }),
   modo: 'ia',
   setModo: (modo) => set({ modo }),
+  user: null,
+  setUser: (user) => set({ user }),
+  ranking: [],
+  
+  loadRanking: async () => {
+    const { data, error } = await supabase
+      .from('rankings')
+      .select('*')
+      .order('victories', { ascending: false })
+      .limit(10);
+      
+    if (error) {
+      console.error('Erro ao carregar ranking:', error);
+      return;
+    }
+    
+    set({ ranking: data });
+  },
+  
+  updateRanking: async (victory: boolean) => {
+    const { user } = get();
+    if (!user) return;
+
+    const { data: existingRanking } = await supabase
+      .from('rankings')
+      .select('*')
+      .eq('user_id', user.id)
+      .single();
+
+    if (existingRanking) {
+      await supabase
+        .from('rankings')
+        .update({ 
+          victories: victory ? existingRanking.victories + 1 : existingRanking.victories 
+        })
+        .eq('user_id', user.id);
+    } else {
+      await supabase
+        .from('rankings')
+        .insert({
+          user_id: user.id,
+          username: user.email?.split('@')[0] || 'Jogador Anônimo',
+          victories: victory ? 1 : 0
+        });
+    }
+
+    get().loadRanking();
+  }
 }));
